@@ -66,8 +66,11 @@ sudo ./covert_sd_card_tool.py [options]
 - `-c`, `--custom` : Create a custom ISO bootable USB (uses Kali-style partitioning with persistence)
 - `-d`, `--docs` : Create an encrypted documents partition
 - `-i`, `--iso` : Path to the ISO file (Kali, Tails, or custom)
-- `--fast` : Enable fast setup mode (Note: Documents partition always uses maximum security)
+- `--fast` : Enable fast setup mode (weaker encryption, faster setup - not recommended)
+- `--paranoid` : Enable paranoid mode (maximum security: 3-pass wipe, Argon2id, PIM 5000)
 - `--debug` : Enable debug mode with verbose logging
+
+**Note:** `--fast` and `--paranoid` are mutually exclusive. Documents partition always uses strong encryption even in fast mode.
 
 ### Examples
 
@@ -107,31 +110,75 @@ sudo ./covert_sd_card_tool.py [options]
   sudo ./covert_sd_card_tool.py -c -i /path/to/custom.iso
   ```
 
+- **Paranoid Mode - Maximum Security (Tails + Docs):**
+
+  ```bash
+  sudo ./covert_sd_card_tool.py -t -d -i /path/to/tails.iso --paranoid
+  ```
+
 ## Security Features
 
 ### Documents Partition Encryption
 
-The documents partition uses **maximum security settings** regardless of the `--fast` flag:
+The documents partition uses **strong security** in all modes:
 
+**Standard Mode (default):**
 - **Triple Cascade Encryption:** AES-Twofish-Serpent (3 layers)
 - **Hash Algorithm:** SHA-512
-- **Key Derivation:** PIM 2000 (enforced for strong key stretching)
+- **Key Derivation:** PIM 2000 (strong key stretching)
+- **Unlock Time:** ~2-3 seconds
 - **Filesystem:** ext4
-- **Full Format:** Always performs full format (no quick format) to overwrite old data
+- **Full Format:** Always overwrites old data
 
-This configuration provides **military-grade security** suitable for sensitive documents like travel documents, credentials, and confidential files.
+**Paranoid Mode (`--paranoid`):**
+- **Triple Cascade Encryption:** AES-Twofish-Serpent (3 layers)
+- **Hash Algorithm:** SHA-512
+- **Key Derivation:** PIM 5000 (maximum key stretching)
+- **Unlock Time:** ~5-7 seconds
+- **Security:** Would take trillions of years to brute force
 
-### Persistence Partition Encryption (Kali)
+**Fast Mode (`--fast`):**
+- Documents still use standard mode (PIM 2000) - no compromise on docs security
 
-- **Normal Mode:** AES-XTS-PLAIN64, 512-bit keys, SHA-512, 5 second iteration time
-- **Fast Mode:** AES-CBC-ESSIV:SHA256, 256-bit keys, SHA-256, 1 second iteration time
+### Persistence Partition Encryption (Kali/Custom)
+
+**Standard Mode (default):**
+- **Algorithm:** AES-XTS-PLAIN64
+- **Key Size:** 512-bit
+- **Hash:** SHA-512
+- **KDF:** LUKS2 PBKDF2
+- **Iteration Time:** 5 seconds
+
+**Paranoid Mode (`--paranoid`):**
+- **Algorithm:** AES-XTS-PLAIN64
+- **Key Size:** 512-bit
+- **Hash:** SHA-512
+- **KDF:** LUKS2 Argon2id (memory-hard, GPU-resistant)
+- **Memory:** 1GB
+- **Parallel Threads:** 4
+- **Iteration Time:** 10 seconds
+
+**Fast Mode (`--fast`):**
+- **Algorithm:** AES-CBC-ESSIV:SHA256
+- **Key Size:** 256-bit
+- **Hash:** SHA-256
+- **KDF:** LUKS1 PBKDF2
+- **Iteration Time:** 1 second
 
 ### Secure Drive Wiping
 
-When you choose to wipe the drive, the tool uses `shred`:
-- **3 passes** of random data overwriting
+**Standard Mode (default):**
+- **1 pass** with zeros (`dd if=/dev/zero`)
+- Fast and sufficient for most use cases
+- Prevents casual data recovery
+- Confirmation required (must type 'WIPE')
+
+**Paranoid Mode (`--paranoid`):**
+- **3 passes** with random data (`shred`)
 - **Final pass** with zeros
 - Makes data recovery virtually impossible
+- Defense against forensic recovery techniques
+- **Much slower** (can take hours on large drives)
 - Confirmation required (must type 'WIPE')
 
 ### OPSEC (Operational Security)
@@ -164,6 +211,25 @@ The tool creates a small unencrypted partition (TOOLS) containing:
 - Simple instructions for non-technical users
 - Generic terminology (no encryption disclosure)
 - Step-by-step mount/lock procedures
+
+## Security Mode Comparison
+
+| Feature | Fast Mode | Standard Mode (Default) | Paranoid Mode |
+|---------|-----------|------------------------|---------------|
+| **Drive Wipe** | Partition table clear only | 1-pass zeros | 3-pass shred + zeros |
+| **Wipe Time (64GB)** | Instant | ~5-10 min | ~2-3 hours |
+| **Persistence KDF** | LUKS1 PBKDF2 | LUKS2 PBKDF2 | LUKS2 Argon2id |
+| **Persistence Unlock** | ~1 sec | ~5 sec | ~10 sec |
+| **Docs Encryption** | AES-Twofish-Serpent | AES-Twofish-Serpent | AES-Twofish-Serpent |
+| **Docs PIM** | 2000 | 2000 | 5000 |
+| **Docs Unlock** | ~2-3 sec | ~2-3 sec | ~5-7 sec |
+| **Best For** | Testing/dev | Travel, daily use | Maximum security, high-value targets |
+
+**Recommendation:** Use **standard mode** for most cases. Use **paranoid mode** if:
+- You're protecting extremely sensitive data
+- You face nation-state level threats
+- You have time for longer setup and unlock times
+- You want defense against forensic analysis
 
 ## Important Security Notes
 

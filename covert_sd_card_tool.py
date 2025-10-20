@@ -12,6 +12,7 @@ import json
 # Global variables
 DEBUG = False
 FAST_MODE = False
+PARANOID_MODE = False
 TIMESTAMP = datetime.now().strftime('%Y%m%d_%H%M%S')
 LOG_FILE = f"covert_sd_setup_{TIMESTAMP}.log"
 CREATE_KALI = False
@@ -29,14 +30,15 @@ def log(message):
         log_file.write(message + "\n")
     print(message)
 
-def run_command(command, shell=False, interactive=False):
+def run_command(command, shell=False, interactive=False, ignore_enospc=False):
     """
     Runs a system command.
-    
+
     Args:
         command (list or str): The command to execute.
         shell (bool): Whether to execute the command through the shell.
         interactive (bool): If True, streams the command's output live.
+        ignore_enospc (bool): If True, don't exit on "No space left" error (for dd filling disk).
     """
     if DEBUG:
         log(f"Running command: {command}")
@@ -44,7 +46,13 @@ def run_command(command, shell=False, interactive=False):
         if interactive:
             # Use subprocess.run with no stdout/stderr capture for truly interactive commands
             # This allows the command to directly interact with the terminal
-            result = subprocess.run(command, shell=shell, check=True)
+            # Don't use check=True if we want to ignore ENOSPC
+            result = subprocess.run(command, shell=shell, check=not ignore_enospc)
+            if ignore_enospc and result.returncode != 0:
+                # For dd, exit code 1 with ENOSPC is success (filled the disk)
+                return
+            elif result.returncode != 0:
+                raise subprocess.CalledProcessError(result.returncode, command)
             return
         else:
             # Handle non-interactive commands
@@ -170,38 +178,101 @@ def setup_usb():
     Sets up the bootable USB (Tails or Kali) and creates additional partitions if required.
     """
     global DRIVE
-    log("Setting up bootable USB or preparing partitions...")
+    log("\n" + "="*70)
+    log("STEP 1: DRIVE SELECTION")
+    log("="*70)
+    log("Available storage devices on your system:")
     list_drives()
+    log("\nIMPORTANT: Double-check the drive path! All data will be erased.")
     DRIVE = input("Enter the drive to use for USB (e.g., /dev/sda) [Default: /dev/sda]: ") or "/dev/sda"
 
-    confirm = input(f"You have selected {DRIVE}. Is this correct? (y/n) [Default: y]: ") or "y"
+    confirm = input(f"\nYou have selected {DRIVE}. Is this correct? (y/n) [Default: y]: ") or "y"
     if confirm.lower() != "y":
         log("Drive selection canceled. Exiting.")
         sys.exit(1)
 
+    log("\n" + "="*70)
+    log("STEP 2: PREPARING DRIVE")
+    log("="*70)
     prepare_drive(DRIVE)
 
     if CREATE_KALI or CREATE_TAILS or CREATE_DOCS:
-        wipe = input(f"Do you want to wipe the drive {DRIVE} before starting? (y/n) [Default: n]: ") or "n"
+        log("\n" + "="*70)
+        log("STEP 3: DRIVE WIPING (OPTIONAL)")
+        log("="*70)
+        log("Wiping destroys all existing data on the drive.")
+        log("This prevents recovery of old files and ensures a clean setup.")
+        log("")
+        if PARANOID_MODE:
+            log("PARANOID MODE: 3-pass overwrite (very slow, ~2-3 hours for 64GB)")
+        else:
+            log("STANDARD MODE: 1-pass zero overwrite (~10-20 min for 64GB)")
+        log("Skip wiping if this is already a blank/new drive.")
+        log("")
+
+        wipe = input(f"Do you want to wipe {DRIVE} before starting? (y/n) [Default: n]: ") or "n"
         if wipe.lower() == "y":
-            log(f"Wiping {DRIVE} and clearing any existing file system or encryption signatures...")
-            log("This will securely overwrite the entire drive with random data. This may take a while...")
-            confirm_wipe = input(f"Are you ABSOLUTELY sure you want to completely wipe {DRIVE}? Type 'WIPE' to confirm: ")
-            if confirm_wipe == "WIPE":
-                run_command(["sudo", "wipefs", "--all", DRIVE])
-                run_command(["sudo", "sgdisk", "--zap-all", DRIVE])
-                # Secure wipe using shred - 3 passes with random data, then zeros
-                run_command(["sudo", "shred", "-vfz", "-n", "3", DRIVE], interactive=True)
-                log(f"{DRIVE} securely wiped successfully.")
+            if PARANOID_MODE:
+                log("\n" + "-"*70)
+                log("PARANOID WIPE: 3 passes with random data + final zero pass")
+                log("WARNING: This will take HOURS on large drives!")
+                log("Estimated time: 2-3 hours for 64GB drive")
+                log("-"*70)
+                confirm_wipe = input(f"Type 'WIPE' to confirm complete wipe of {DRIVE}: ")
+                if confirm_wipe == "WIPE":
+                    log("\nClearing partition table and filesystem signatures...")
+                    run_command(["sudo", "wipefs", "--all", DRIVE])
+                    run_command(["sudo", "sgdisk", "--zap-all", DRIVE])
+                    log("\nStarting 3-pass shred (this will take a long time)...")
+                    log("Pass 1/3: Random data")
+                    log("Pass 2/3: Random data")
+                    log("Pass 3/3: Random data")
+                    log("Final pass: Zeros")
+                    log("You can monitor progress below:")
+                    # Paranoid: 3 passes with random data, then zeros
+                    run_command(["sudo", "shred", "-vfz", "-n", "3", DRIVE], interactive=True)
+                    log(f"\n✓ {DRIVE} securely wiped successfully (paranoid mode).")
+                else:
+                    log("\nFull wipe canceled. Clearing partition table only...")
+                    run_command(["sudo", "wipefs", "--all", DRIVE])
+                    run_command(["sudo", "sgdisk", "--zap-all", DRIVE])
+                    log("✓ Partition table cleared.")
             else:
-                log("Wipe canceled. Proceeding without full wipe (only clearing partition table)...")
-                run_command(["sudo", "wipefs", "--all", DRIVE])
-                run_command(["sudo", "sgdisk", "--zap-all", DRIVE])
+                log("\n" + "-"*70)
+                log("STANDARD WIPE: Single pass with zeros")
+                log("Estimated time: ~10-20 minutes for 64GB drive")
+                log("-"*70)
+                confirm_wipe = input(f"Type 'WIPE' to confirm wipe of {DRIVE}: ")
+                if confirm_wipe == "WIPE":
+                    log("\nClearing partition table and filesystem signatures...")
+                    run_command(["sudo", "wipefs", "--all", DRIVE])
+                    run_command(["sudo", "sgdisk", "--zap-all", DRIVE])
+                    log("\nOverwriting entire drive with zeros...")
+                    log("Progress will be shown below (this may take 10-20 minutes):")
+                    log("(Note: dd will show 'No space left on device' when complete - this is normal)")
+                    log("")
+                    # Standard: Single pass with zeros (much faster)
+                    # Note: dd will report "No space left on device" when it fills the drive - this is expected and means success
+                    run_command(["sudo", "dd", "if=/dev/zero", f"of={DRIVE}", "bs=1M", "status=progress", "conv=fdatasync"], interactive=True, ignore_enospc=True)
+                    log(f"\n✓ {DRIVE} wiped successfully (standard mode).")
+                else:
+                    log("\nFull wipe canceled. Clearing partition table only...")
+                    run_command(["sudo", "wipefs", "--all", DRIVE])
+                    run_command(["sudo", "sgdisk", "--zap-all", DRIVE])
+                    log("✓ Partition table cleared.")
+        else:
+            log("\nSkipping full drive wipe. Clearing partition table only...")
+            run_command(["sudo", "wipefs", "--all", DRIVE])
+            run_command(["sudo", "sgdisk", "--zap-all", DRIVE])
+            log("✓ Partition table cleared.")
 
     # Initialize variables to track if ISO has been written
     iso_written = False
 
     if CREATE_KALI or CREATE_TAILS or CREATE_CUSTOM:
+        log("\n" + "="*70)
+        log("STEP 4: WRITING BOOTABLE ISO")
+        log("="*70)
         global KALI_ISO, TAILS_ISO, CUSTOM_ISO
         if CREATE_KALI:
             if not KALI_ISO:
@@ -210,6 +281,7 @@ def setup_usb():
                 log(f"Error: Kali ISO file not found at {KALI_ISO}")
                 sys.exit(1)
             ISO_PATH = KALI_ISO
+            iso_name = "Kali Linux"
         elif CREATE_TAILS:
             if not TAILS_ISO:
                 TAILS_ISO = input("Enter the path to the Tails ISO file: ")
@@ -217,6 +289,7 @@ def setup_usb():
                 log(f"Error: Tails ISO file not found at {TAILS_ISO}")
                 sys.exit(1)
             ISO_PATH = TAILS_ISO
+            iso_name = "Tails"
         elif CREATE_CUSTOM:
             if not CUSTOM_ISO:
                 CUSTOM_ISO = input("Enter the path to your custom ISO file: ")
@@ -224,18 +297,33 @@ def setup_usb():
                 log(f"Error: Custom ISO file not found at {CUSTOM_ISO}")
                 sys.exit(1)
             ISO_PATH = CUSTOM_ISO
+            iso_name = "Custom"
+
+        # Get ISO size for time estimate
+        iso_size_bytes = os.path.getsize(ISO_PATH)
+        iso_size_gb = iso_size_bytes / (1024**3)
+        estimated_time = int((iso_size_gb / 0.5) * 60)  # Rough estimate: 30 seconds per GB at 50MB/s
+
+        log(f"ISO file: {ISO_PATH}")
+        log(f"ISO size: {iso_size_gb:.2f} GB")
+        log(f"Estimated write time: ~{estimated_time} seconds ({estimated_time//60} min)")
+        log("")
 
         if CREATE_TAILS:
             # For Tails, flash the ISO to the entire drive without any partitioning
-            log(f"Flashing Tails ISO to {DRIVE}...")
+            log(f"Writing {iso_name} ISO to {DRIVE}...")
+            log("Progress will be shown below:")
+            log("")
             run_command(f"sudo dd if='{ISO_PATH}' of='{DRIVE}' bs=64M status=progress conv=fdatasync", shell=True, interactive=True)
-            log(f"Tails ISO flashed to {DRIVE} successfully.")
+            log(f"\n✓ {iso_name} ISO written to {DRIVE} successfully.")
             iso_written = True
         else:
             # For Kali or Custom ISO, flash and proceed with partition setup
-            log(f"Flashing ISO to {DRIVE}...")
+            log(f"Writing {iso_name} ISO to {DRIVE}...")
+            log("Progress will be shown below:")
+            log("")
             run_command(f"sudo dd if='{ISO_PATH}' of='{DRIVE}' bs=64M status=progress conv=fdatasync", shell=True, interactive=True)
-            log(f"ISO flashed to {DRIVE} successfully.")
+            log(f"\n✓ {iso_name} ISO written to {DRIVE} successfully.")
             iso_written = True
 
     # After writing ISO, set up partitions accordingly
@@ -258,15 +346,24 @@ def fix_partition_table_docs_only():
     """
     Sets up partitions solely for encrypted documents without altering existing OS partitions.
     """
-    log("Setting up partitions for documents only...")
+    log("\n" + "="*70)
+    log("STEP 5: CREATING PARTITION LAYOUT")
+    log("="*70)
+    log("Creating 2 partitions:")
+    log("  1. Encrypted documents partition (VeraCrypt)")
+    log("  2. Tools partition (1GB, unencrypted, contains mount scripts)")
+    log("")
 
     # Clear existing GPT label to start fresh
+    log("Creating fresh GPT partition table...")
     run_command(f"sudo parted -a optimal -s {DRIVE} mklabel gpt", shell=True)
     run_command(f"sudo partprobe {DRIVE}", shell=True)
     run_command("sudo udevadm settle", shell=True)
     time.sleep(5)  # Increased sleep to ensure partitions are recognized
+    log("✓ GPT partition table created")
 
     # Get the total size of the drive in bytes
+    log("\nCalculating partition sizes...")
     result = subprocess.run(["lsblk", "-b", "-d", "-n", "-o", "SIZE", DRIVE], capture_output=True, text=True)
     try:
         total_size_bytes = int(result.stdout.strip())
@@ -277,8 +374,9 @@ def fix_partition_table_docs_only():
     total_size_gb = total_size_mib / 1024  # Convert to GiB
     available_gb = (total_size_mib - 1024) / 1024  # Minus 1GB reserved for scripts
 
-    log(f"Total drive size: {total_size_gb:.2f} GB ({total_size_mib:.0f} MiB)")
-    log(f"Available space for documents (minus 1GB for scripts): {available_gb:.2f} GB")
+    log(f"  Total drive size: {total_size_gb:.2f} GB ({total_size_mib:.0f} MiB)")
+    log(f"  Available for documents: {available_gb:.2f} GB (after reserving 1GB for tools)")
+    log("")
 
     # Ask for document partition size
     size_docs = input("Enter size for documents partition in GB (leave blank to use remaining space minus 1GB): ")
@@ -297,18 +395,22 @@ def fix_partition_table_docs_only():
         end_docs_mib = total_size_mib - 1024  # Reserve 1GB for unencrypted partition
 
     # Create documents partition
+    log(f"\nCreating partition 1 (documents): {(end_docs_mib - start_docs_mib)/1024:.2f} GB...")
     run_command(f"sudo parted -a optimal -s {DRIVE} mkpart primary {start_docs_mib}MiB {end_docs_mib}MiB", shell=True)
-    log("Created documents partition.")
+    log("✓ Documents partition created")
 
     # Create unencrypted partition
     start_unencrypted_mib = end_docs_mib
+    log(f"Creating partition 2 (tools): ~1 GB...")
     run_command(f"sudo parted -a optimal -s {DRIVE} mkpart primary {start_unencrypted_mib}MiB 100%", shell=True)
-    log("Created unencrypted partition for scripts/instructions.")
+    log("✓ Tools partition created")
 
     # Refresh partition table to recognize new partitions
+    log("\nRefreshing partition table...")
     run_command(f"sudo partprobe {DRIVE}", shell=True)
     run_command("sudo udevadm settle", shell=True)
     time.sleep(5)  # Increased sleep to ensure partitions are recognized
+    log("✓ Partition table refreshed")
 
     setup_unencrypted_partition()
     setup_docs_partition()
@@ -536,9 +638,24 @@ def setup_kali_partition():
             f"--verify-passphrase"
         )
         mkfs_cmd = f"sudo mkfs.ext3 -L persistence /dev/mapper/kali_USB"
+    elif PARANOID_MODE:
+        luks_format_cmd = (
+            f"sudo cryptsetup luksFormat '{PERSIST_PART}' "
+            f"--type luks2 "
+            f"--cipher aes-xts-plain64 "
+            f"--key-size 512 "
+            f"--hash sha512 "
+            f"--pbkdf argon2id "
+            f"--iter-time 10000 "
+            f"--pbkdf-memory 1048576 "
+            f"--pbkdf-parallel 4 "
+            f"--verify-passphrase"
+        )
+        mkfs_cmd = f"sudo mkfs.ext4 -L persistence /dev/mapper/kali_USB"
     else:
         luks_format_cmd = (
             f"sudo cryptsetup luksFormat '{PERSIST_PART}' "
+            f"--type luks2 "
             f"--cipher aes-xts-plain64 "
             f"--key-size 512 "
             f"--hash sha512 "
@@ -567,14 +684,19 @@ def setup_docs_partition():
     global DRIVE
     DOCS_PART = get_partition_name(DRIVE, get_last_partition_number() - 1)
 
+    log("\n" + "="*70)
+    log("STEP 6: ENCRYPTING DOCUMENTS PARTITION")
+    log("="*70)
+
     # Check if the partition exists
     if not os.path.exists(DOCS_PART):
         log(f"Error: Partition {DOCS_PART} does not exist.")
         sys.exit(1)
 
     # Force wipe existing filesystem signatures
+    log(f"Preparing partition {DOCS_PART}...")
     run_command(["sudo", "wipefs", "--all", "--force", DOCS_PART])
-    log(f"Removed existing filesystem signatures from {DOCS_PART}.")
+    log(f"✓ Partition prepared")
 
     log("\n" + "="*70)
     log("ENCRYPTED VOLUME SETUP")
@@ -586,9 +708,12 @@ def setup_docs_partition():
     log("     - Mix uppercase, lowercase, numbers, and symbols")
     log("     - Avoid dictionary words or personal information")
     log("  2. PIM (Personal Iterations Multiplier):")
-    log("     - RECOMMENDED: Enter 2000 for maximum security")
-    log("     - Minimum acceptable: 1000")
-    log("     - Higher = more secure but slower unlock (2-3 seconds)")
+    if PARANOID_MODE:
+        log("     - PARANOID MODE: PIM set to 5000 (maximum security)")
+        log("     - Unlock time: ~5-7 seconds")
+    else:
+        log("     - STANDARD: PIM set to 2000 (high security)")
+        log("     - Unlock time: ~2-3 seconds")
     log("  3. KEYFILES: Leave blank unless you know what you're doing")
     log("\nIMPORTANT: Remember your password! There is NO password recovery!")
     log("="*70)
@@ -598,17 +723,29 @@ def setup_docs_partition():
 
     # Always use maximum security for documents partition (ignore FAST_MODE)
     # Triple cascade encryption with strongest hash
+    pim_value = 5000 if PARANOID_MODE else 2000
     veracrypt_create_cmd = (
         f"veracrypt --text --create '{DOCS_PART}' "
         f"--encryption AES-Twofish-Serpent "
         f"--hash SHA-512 "
         f"--filesystem ext4 "
         f"--volume-type normal "
-        f"--pim 2000 "  # Enforce strong PIM for maximum security
+        f"--pim {pim_value} "  # 2000 standard, 5000 paranoid
     )
 
+    log("\nStarting VeraCrypt encryption (this may take a few minutes)...")
+    log("You will be prompted for:")
+    log("  1. Password (enter twice)")
+    log("  2. PIM (press Enter to use default)")
+    log("  3. Keyfiles (press Enter to skip)")
+    log("  4. Filesystem (will use ext4 automatically)")
+    log("")
     run_command(veracrypt_create_cmd, shell=True, interactive=True)
-    log("Encrypted documents partition setup complete.")
+    log("\n✓ Documents partition encrypted successfully!")
+    log(f"  Encryption: AES-Twofish-Serpent (triple cascade)")
+    log(f"  Hash: SHA-512")
+    log(f"  PIM: {pim_value}")
+    log(f"  Filesystem: ext4")
 
 def setup_unencrypted_partition():
     """
@@ -617,17 +754,23 @@ def setup_unencrypted_partition():
     global DRIVE
     UNENCRYPTED_PART = get_partition_name(DRIVE, get_last_partition_number())
 
+    log("\n" + "="*70)
+    log("STEP 7: SETTING UP TOOLS PARTITION")
+    log("="*70)
+
     # Check if the partition exists
     if not os.path.exists(UNENCRYPTED_PART):
         log(f"Error: Partition {UNENCRYPTED_PART} does not exist.")
         sys.exit(1)
 
-    log(f"Attempting to format partition {UNENCRYPTED_PART} with FAT32 filesystem.")
+    log(f"Formatting {UNENCRYPTED_PART} as FAT32...")
     run_command(f"sudo mkfs.vfat -n 'TOOLS' {UNENCRYPTED_PART}", shell=True)
-    log("Formatted unencrypted partition with FAT32 filesystem.")
+    log("✓ FAT32 filesystem created")
 
+    log("Mounting tools partition...")
     run_command("sudo mkdir -p /mnt/unencrypted", shell=True)
     run_command(f"sudo mount {UNENCRYPTED_PART} /mnt/unencrypted", shell=True)
+    log("✓ Tools partition mounted")
 
     instructions = f"""
 INSTRUCTIONS FOR ACCESSING SECURE STORAGE
@@ -645,11 +788,12 @@ To safely lock your storage:
 IMPORTANT: Always lock your storage before removing the device.
 """
 
+    log("\nCreating helper files...")
     with open("/tmp/README.txt", "w") as readme_file:
         readme_file.write(instructions)
     run_command("sudo cp /tmp/README.txt /mnt/unencrypted/README.txt", shell=True)
     run_command("sudo rm /tmp/README.txt", shell=True)
-    log("Created README.txt with mounting instructions.")
+    log("  ✓ README.txt created")
 
     mount_script = """#!/bin/bash
 # Script to mount secure storage partition
@@ -694,7 +838,7 @@ fi
     run_command("sudo cp /tmp/mount_storage.sh /mnt/unencrypted/mount_storage.sh", shell=True)
     run_command("sudo chmod +x /mnt/unencrypted/mount_storage.sh", shell=True)
     run_command("sudo rm /tmp/mount_storage.sh", shell=True)
-    log("Created mount_storage.sh script.")
+    log("  ✓ mount_storage.sh created")
 
     cleanup_script = """#!/bin/bash
 # Script to safely lock secure storage
@@ -748,10 +892,11 @@ fi
     run_command("sudo cp /tmp/lock_storage.sh /mnt/unencrypted/lock_storage.sh", shell=True)
     run_command("sudo chmod +x /mnt/unencrypted/lock_storage.sh", shell=True)
     run_command("sudo rm /tmp/lock_storage.sh", shell=True)
-    log("Created lock_storage.sh script.")
+    log("  ✓ lock_storage.sh created")
 
+    log("\nUnmounting tools partition...")
     run_command("sudo umount /mnt/unencrypted", shell=True)
-    log("Unencrypted partition setup complete.")
+    log("✓ Tools partition setup complete")
 
 def get_last_partition_number():
     """
@@ -803,6 +948,7 @@ def main():
     parser.add_argument("-c", "--custom", action="store_true", help="Create custom ISO bootable USB (like Kali, with persistence)")
     parser.add_argument("-i", "--iso", help="Path to the ISO file (Kali, Tails, or custom)")
     parser.add_argument("--fast", action="store_true", help="Enable fast setup with less secure encryption")
+    parser.add_argument("--paranoid", action="store_true", help="Enable paranoid mode: maximum security, 3-pass shred, highest encryption")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
 
     args = parser.parse_args()
@@ -819,8 +965,17 @@ def main():
         log("Debug mode enabled")
 
     FAST_MODE = args.fast
+    PARANOID_MODE = args.paranoid
+
+    # Paranoid and Fast are mutually exclusive
+    if FAST_MODE and PARANOID_MODE:
+        log("Error: Cannot use --fast and --paranoid modes together.")
+        sys.exit(1)
+
     if FAST_MODE:
         log("Fast mode enabled: Using less secure encryption for quicker setup.")
+    elif PARANOID_MODE:
+        log("PARANOID MODE enabled: Maximum security - 3-pass wipe, strongest encryption, highest PIM.")
 
     if args.all:
         CREATE_DOCS = True
@@ -842,7 +997,43 @@ def main():
 
     check_dependencies()
     setup_usb()
-    log("Partition setup complete.")
+
+    # Final summary
+    log("\n" + "="*70)
+    log("SETUP COMPLETE!")
+    log("="*70)
+    log("")
+    log("Your secure storage device is ready!")
+    log("")
+    log("What was created:")
+    if CREATE_KALI:
+        log("  ✓ Kali Linux bootable drive")
+        log("  ✓ LUKS encrypted persistence partition")
+    elif CREATE_TAILS:
+        log("  ✓ Tails bootable drive")
+    elif CREATE_CUSTOM:
+        log("  ✓ Custom bootable drive")
+        log("  ✓ LUKS encrypted persistence partition")
+
+    if CREATE_DOCS:
+        log("  ✓ VeraCrypt encrypted documents partition")
+        if PARANOID_MODE:
+            log("    - Triple cascade encryption (AES-Twofish-Serpent)")
+            log("    - PIM 5000 (PARANOID mode)")
+        else:
+            log("    - Triple cascade encryption (AES-Twofish-Serpent)")
+            log("    - PIM 2000 (standard security)")
+        log("  ✓ Tools partition with helper scripts")
+        log("")
+        log("Next steps:")
+        log("  1. Safely eject the device")
+        log("  2. On your target system, mount the TOOLS partition")
+        log("  3. Read README.txt for instructions")
+        log("  4. Run: sudo ./mount_storage.sh")
+        log("")
+
+    log(f"Log file saved: {LOG_FILE}")
+    log("="*70)
 
 if __name__ == "__main__":
     main()
