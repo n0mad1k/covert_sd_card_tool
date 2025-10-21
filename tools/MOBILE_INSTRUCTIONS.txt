@@ -1,0 +1,239 @@
+======================================================================
+          SECURE STORAGE - MOBILE DEVICE INSTRUCTIONS
+======================================================================
+
+IMPORTANT: Mobile access has limitations compared to desktop.
+Read carefully to understand what's possible on your device.
+
+======================================================================
+ANDROID DEVICES
+======================================================================
+
+REQUIREMENTS:
+  • Android 5.0 or newer
+  • EDS (Encrypted Data Store) app - REQUIRED
+  • USB OTG adapter (to connect USB device to phone)
+  • File manager app (most phones have one built-in)
+
+REQUIRED APP:
+  • EDS Lite (Free & Open Source)
+  • Google Play: https://play.google.com/store/apps/details?id=com.sovworks.eds.android
+  • Direct link if Google Play doesn't work:
+    https://play.google.com/store/apps/details?id=com.sovworks.projecteds
+
+----------------------------------------------------------------------
+SETUP: Using EDS Lite (RECOMMENDED)
+----------------------------------------------------------------------
+
+Step 1: Install EDS Lite
+        • Open Google Play Store
+        • Search for "EDS Lite" or "EDS (Encrypted Data Store)"
+        • Install the app (it's FREE)
+        • Or use the direct link above
+
+Step 2: Connect your USB device
+        • Connect USB device using OTG adapter
+        • Android should show "USB device connected" notification
+
+Step 3: Open EDS Lite app
+        • Tap "Open container"
+        • Navigate to your USB device
+        • Look for the partition WITHOUT a filesystem/label
+        • Select the encrypted partition
+
+Step 4: Enter password
+        • Select encryption: VeraCrypt
+        • Enter your password
+        • For PIM: enter 2000 or 5000 (whatever you set)
+        • Tap "OK"
+
+Step 5: Access your files
+        • Files will appear in EDS Lite
+        • You can view, copy, or share files
+        • Some apps can open files directly from EDS
+
+IMPORTANT - Safely Close:
+        • Tap "Close container" when done
+        • Wait for confirmation before unplugging
+        • Only then remove USB device
+
+----------------------------------------------------------------------
+ALTERNATIVE: VeraCrypt for Android (Advanced Users)
+----------------------------------------------------------------------
+
+ℹ️ NOTE: EDS Lite (above) is easier to use and recommended.
+   Only use VeraCrypt if you're familiar with it.
+
+Step 1: Install VeraCrypt for Android
+        • Download from: https://github.com/veracrypt/veracrypt
+        • Or install from F-Droid store
+        • Enable "Unknown sources" if needed
+
+Step 2-5: Follow similar steps as EDS Lite above
+        • The interface is similar to desktop VeraCrypt
+        • Process is the same: select partition, enter password, mount
+
+======================================================================
+iOS DEVICES (iPhone/iPad)
+======================================================================
+
+✅ SOLUTION: Crypto Disks App (Paid)
+
+RECOMMENDED APP:
+  • Crypto Disks - Store Private Files Securely
+  • App Store: https://apps.apple.com/us/app/crypto-disks-store-private/id889549308
+  • Price: ~$4.99 (one-time purchase)
+  • Supports VeraCrypt containers!
+
+----------------------------------------------------------------------
+SETUP: Using Crypto Disks on iOS
+----------------------------------------------------------------------
+
+Step 1: Purchase and Install Crypto Disks
+        • Open App Store on your iPhone/iPad
+        • Search for "Crypto Disks"
+        • Or use the direct link above
+        • Purchase and install (~$4.99)
+
+Step 2: Transfer Encrypted Container
+        ⚠️ LIMITATION: iOS doesn't support direct USB access like Android
+
+        You have two options:
+
+        OPTION A: Copy via Computer (Easier)
+        1. Connect USB device to your Mac/PC
+        2. Mount the encrypted partition with VeraCrypt
+        3. Create a smaller VeraCrypt container file inside
+        4. Transfer that container to your iPhone via:
+           - AirDrop (Mac to iPhone)
+           - iCloud Drive
+           - iTunes File Sharing
+        5. Open in Crypto Disks app
+
+        OPTION B: Use Wi-Fi File Transfer
+        1. Use Crypto Disks' built-in file transfer
+        2. Transfer container file from computer
+        3. Open in app
+
+Step 3: Mount in Crypto Disks App
+        • Open Crypto Disks app
+        • Select "Add Disk Image"
+        • Choose your transferred container
+        • Enter password and PIM
+        • Access your files
+
+⚠️ IMPORTANT iOS LIMITATIONS:
+   • Cannot directly mount USB partition (Apple restriction)
+   • Must use container FILES, not raw partitions
+   • Requires copying/transferring container to iPhone
+   • Best for occasional access, not primary use
+
+----------------------------------------------------------------------
+iOS WORKAROUND: Emergency Access Only
+----------------------------------------------------------------------
+
+If you don't want to pay for Crypto Disks, here are free alternatives:
+
+Option A: Use a Computer as Bridge
+        1. Mount the encrypted storage on your Mac/PC
+        2. Copy files you need to iCloud or Files app
+        3. Access those files from your iPhone
+        4. Delete copies when done (IMPORTANT for security!)
+
+Option B: Use Remote Access
+        1. Mount encrypted storage on your home computer
+        2. Set up secure remote access (VPN + file sharing)
+        3. Access files remotely from iPhone
+        4. More complex but maintains security
+
+Option C: Take Photos of Documents
+        1. If you just need to VIEW travel docs in emergency
+        2. Take photos/screenshots on computer
+        3. Store in encrypted note app (Apple Notes with lock)
+        4. Delete after trip
+
+NOTE: These workarounds compromise security slightly.
+      Crypto Disks app is the most secure iOS solution.
+
+======================================================================
+IMPORTANT SECURITY NOTES FOR MOBILE
+======================================================================
+
+⚠ Screen Lock
+   • Always have a PIN/password on your phone
+   • If someone steals your phone while storage is mounted,
+     they can access your files
+
+⚠ App Permissions
+   • Only grant necessary permissions to encryption apps
+   • Be cautious with "file access" permissions
+
+⚠ Public WiFi
+   • Don't use public WiFi when accessing sensitive files
+   • Or use a VPN if you must
+
+⚠ Battery Concerns
+   • Don't let your phone die while storage is mounted
+   • Always properly close/dismount before battery runs out
+
+⚠ Background Apps
+   • Close the encryption app properly when done
+   • Don't just switch to another app
+   • Storage might stay mounted in background
+
+⚠ Phone Updates
+   • Close encrypted storage before major OS updates
+   • Updates might interrupt and cause corruption
+
+======================================================================
+TROUBLESHOOTING - ANDROID
+======================================================================
+
+"Cannot find USB device"
+  • Try a different OTG adapter
+  • Check if your phone supports USB OTG
+  • Some phones need USB settings changed (File Transfer mode)
+
+"Wrong password" (but password is correct)
+  • Make sure you selected "VeraCrypt" as encryption type
+  • Verify PIM value (2000 or 5000)
+  • Some apps don't support all VeraCrypt settings
+
+"App crashes when mounting"
+  • Try a different encryption app (EDS vs VeraCrypt)
+  • Check if partition is already mounted
+  • Restart phone and try again
+
+"Can't edit files, only view"
+  • This is normal for some apps
+  • Copy file to phone storage
+  • Edit it there
+  • Copy back when done
+
+"Storage disconnected unexpectedly"
+  • Check USB connection
+  • Some phones cut power to USB to save battery
+  • Disable battery optimization for the encryption app
+
+======================================================================
+LIMITATIONS OF MOBILE ACCESS
+======================================================================
+
+Things that DON'T work well on mobile:
+  ✗ Editing large files directly on encrypted storage
+  ✗ Running programs/apps from encrypted storage
+  ✗ Fast file operations (mobile is slower than desktop)
+  ✗ iOS access (not supported at all)
+
+Things that WORK WELL on mobile:
+  ✓ Viewing documents (PDFs, photos, etc.)
+  ✓ Copying individual files to phone
+  ✓ Sharing files to other apps
+  ✓ Emergency access when no computer available
+  ✓ Quick lookup of information
+
+RECOMMENDATION:
+  Use mobile access for emergencies and viewing only.
+  Use desktop (Linux/Windows) for actual file management.
+
+======================================================================

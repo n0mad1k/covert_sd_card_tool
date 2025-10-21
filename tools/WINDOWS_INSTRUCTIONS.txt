@@ -1,0 +1,93 @@
+======================================================================
+           SECURE STORAGE - WINDOWS INSTRUCTIONS
+======================================================================
+
+REQUIREMENTS:
+  • This secure storage device connected
+  • NO SOFTWARE INSTALLATION NEEDED!
+
+======================================================================
+HOW TO ACCESS YOUR SECURE FILES (WINDOWS)
+======================================================================
+
+OPTION 1: USE PORTABLE VERACRYPT (RECOMMENDED - NO INSTALL!)
+
+Step 1: Open the VeraCrypt folder on this USB drive
+
+Step 2: Double-click "VeraCrypt-Portable-Windows.exe"
+        • It runs directly - no installation!
+        • Works on most Windows PCs without admin rights
+        • If blocked, right-click → "Run anyway"
+
+Step 3: The VeraCrypt window opens
+
+----------------------------------------------------------------------
+
+OPTION 2: USE INSTALLED VERACRYPT (if you prefer)
+
+Step 1: Install VeraCrypt (if not already installed)
+        • Go to https://www.veracrypt.fr/en/Downloads.html
+        • Download VeraCrypt for Windows
+        • Run the installer
+
+Step 2: Open VeraCrypt from Start Menu
+        • Search for "VeraCrypt" in Start Menu
+        • Click "VeraCrypt" to launch
+
+----------------------------------------------------------------------
+
+CONTINUING (after opening VeraCrypt either way):
+
+Step 3: Select a drive letter
+        • In VeraCrypt window, click any drive letter (e.g., Z:)
+
+Step 4: Select Volume
+        • Click "Select Device..." button
+        • Find your USB device (look for the partition WITHOUT a filesystem)
+        • Usually it's the second-to-last partition
+        • Click OK
+
+Step 5: Click "Mount" button
+        • Enter your password when prompted
+        • For PIM: leave blank or enter the PIM you set (2000 or 5000)
+        • Click OK
+
+Step 6: Access your files
+        • Open File Explorer
+        • Look for new drive (e.g., Z:)
+        • Your files are there!
+
+======================================================================
+HOW TO SAFELY LOCK YOUR STORAGE (WINDOWS)
+======================================================================
+
+Step 1: Close ALL programs using the secure storage
+        • Save documents
+        • Close File Explorer windows
+        • Close any apps with open files
+
+Step 2: In VeraCrypt window
+        • Select the mounted drive (e.g., Z:)
+        • Click "Dismount" button
+
+Step 3: Safe to remove
+        • Click "Safely Remove Hardware" in system tray
+        • Select your USB device
+        • Remove when Windows says it's safe
+
+======================================================================
+IMPORTANT NOTES
+======================================================================
+
+⚠ ALWAYS dismount before removing the device!
+   Otherwise you risk data corruption.
+
+⚠ If you forget your password, your data is GONE.
+   There is NO password recovery.
+
+⚠ Partition to select:
+   • Look in VeraCrypt's "Select Device" window
+   • Choose the partition WITHOUT a label/filesystem
+   • It's usually NOT the one labeled "TOOLS"
+
+======================================================================

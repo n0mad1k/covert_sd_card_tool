@@ -8,6 +8,8 @@ import shutil
 from datetime import datetime
 import time
 import json
+import urllib.request
+import tempfile
 
 # Global variables
 DEBUG = False
@@ -80,6 +82,145 @@ def run_command(command, shell=False, interactive=False, ignore_enospc=False):
                 log(result.stderr.strip())
     except subprocess.CalledProcessError as e:
         log(f"Command failed: {e}\nOutput: {e.stdout}\nError: {e.stderr}")
+        sys.exit(1)
+
+def download_file(url, destination, description="file"):
+    """
+    Downloads a file with progress indication.
+
+    Args:
+        url (str): URL to download from
+        destination (str): Local path to save file
+        description (str): Description for user feedback
+    """
+    try:
+        log(f"Downloading {description}...")
+        log(f"  From: {url}")
+        log(f"  To: {destination}")
+
+        def progress_hook(block_num, block_size, total_size):
+            if total_size > 0:
+                downloaded = block_num * block_size
+                percent = min(100, (downloaded * 100) // total_size)
+                mb_downloaded = downloaded / (1024 * 1024)
+                mb_total = total_size / (1024 * 1024)
+                # Use \r to overwrite the same line
+                print(f"\r  Progress: {percent}% ({mb_downloaded:.1f} MB / {mb_total:.1f} MB)", end='', flush=True)
+
+        urllib.request.urlretrieve(url, destination, reporthook=progress_hook)
+        print()  # New line after progress
+        log(f"✓ {description} downloaded successfully")
+        return True
+    except Exception as e:
+        log(f"✗ Failed to download {description}: {e}")
+        return False
+
+def download_portable_veracrypt():
+    """
+    Downloads portable VeraCrypt binaries for Windows, Linux, and macOS.
+    Returns the path to a temporary directory containing the downloads.
+    """
+    log("\n" + "="*70)
+    log("DOWNLOADING PORTABLE VERACRYPT")
+    log("="*70)
+    log("\nTo make this device work on ANY computer without software installation,")
+    log("we need to download portable VeraCrypt for Windows, Linux, and macOS.")
+    log("")
+    log("Total download size: ~86-90 MB")
+    log("  • Windows Portable: ~39 MB")
+    log("  • Linux AppImage: ~13 MB")
+    log("  • Linux .deb Installer: ~13 MB")
+    log("  • macOS DMG: ~22 MB")
+    log("")
+    log("This is a one-time download that will be stored on your device.")
+    log("")
+
+    # Create temp directory for downloads
+    temp_dir = tempfile.mkdtemp(prefix="veracrypt_download_")
+    log(f"Using temporary directory: {temp_dir}")
+    log("")
+
+    # Get latest VeraCrypt version from GitHub
+    log("Fetching latest VeraCrypt version from GitHub...")
+    try:
+        import urllib.request
+        import json
+        with urllib.request.urlopen("https://api.github.com/repos/veracrypt/VeraCrypt/releases/latest") as response:
+            release_data = json.loads(response.read().decode())
+            VC_TAG = release_data["tag_name"]  # e.g., "VeraCrypt_1.26.24"
+            VC_VERSION = VC_TAG.replace("VeraCrypt_", "")  # e.g., "1.26.24"
+            log(f"✓ Latest version: {VC_VERSION}")
+    except Exception as e:
+        log(f"⚠ Warning: Could not fetch latest version ({e})")
+        log("  Falling back to version 1.26.24")
+        VC_TAG = "VeraCrypt_1.26.24"
+        VC_VERSION = "1.26.24"
+
+    log("")
+
+    downloads = {
+        "Windows Portable": {
+            "url": f"https://github.com/veracrypt/VeraCrypt/releases/download/{VC_TAG}/VeraCrypt.Portable.{VC_VERSION}.exe",
+            "filename": "VeraCrypt-Portable-Windows.exe",
+            "required": True
+        },
+        "Linux Portable AppImage": {
+            "url": f"https://github.com/veracrypt/VeraCrypt/releases/download/{VC_TAG}/VeraCrypt-{VC_VERSION}-x86_64.AppImage",
+            "filename": "VeraCrypt-Portable-Linux.AppImage",
+            "required": True
+        },
+        "Linux DEB Installer": {
+            "url": f"https://github.com/veracrypt/VeraCrypt/releases/download/{VC_TAG}/veracrypt-{VC_VERSION}-Ubuntu-22.04-amd64.deb",
+            "filename": "veracrypt-Ubuntu-22.04-amd64.deb",
+            "required": False
+        },
+        "macOS": {
+            "url": f"https://github.com/veracrypt/VeraCrypt/releases/download/{VC_TAG}/VeraCrypt_{VC_VERSION}.dmg",
+            "filename": "VeraCrypt-MacOS.dmg",
+            "required": False
+        }
+    }
+
+    success_count = 0
+    required_count = 0
+
+    for platform, info in downloads.items():
+        log(f"\n[{platform}]")
+        dest_path = os.path.join(temp_dir, info["filename"])
+
+        if info.get("required"):
+            required_count += 1
+
+        if download_file(info["url"], dest_path, f"{platform} VeraCrypt"):
+            success_count += 1
+
+            # Make Linux AppImage executable
+            if "AppImage" in info["filename"]:
+                try:
+                    os.chmod(dest_path, 0o755)
+                    log(f"  ✓ Made executable")
+                except Exception as e:
+                    log(f"  ⚠ Warning: Could not make executable: {e}")
+        else:
+            if info.get("required"):
+                log(f"  ✗ ERROR: {platform} is required but download failed!")
+
+    log("\n" + "="*70)
+    if success_count >= required_count:
+        log("✓ PORTABLE VERACRYPT DOWNLOAD COMPLETE")
+        log("="*70)
+        log(f"\nDownloaded {success_count} of {len(downloads)} platform(s)")
+        log(f"Files saved to: {temp_dir}")
+        return temp_dir
+    else:
+        log("✗ DOWNLOAD FAILED")
+        log("="*70)
+        log(f"\nOnly {success_count} of {required_count} required downloads succeeded.")
+        log("Cannot proceed without portable VeraCrypt binaries.")
+        log("\nTroubleshooting:")
+        log("  • Check your internet connection")
+        log("  • Verify firewall settings")
+        log("  • Try again later (download servers may be busy)")
         sys.exit(1)
 
 def check_dependencies():
@@ -178,6 +319,12 @@ def setup_usb():
     Sets up the bootable USB (Tails or Kali) and creates additional partitions if required.
     """
     global DRIVE
+
+    # Download portable VeraCrypt first (so it's ready to copy later)
+    veracrypt_dir = None
+    if CREATE_DOCS:
+        veracrypt_dir = download_portable_veracrypt()
+
     log("\n" + "="*70)
     log("STEP 1: DRIVE SELECTION")
     log("="*70)
@@ -412,7 +559,7 @@ def fix_partition_table_docs_only():
     time.sleep(5)  # Increased sleep to ensure partitions are recognized
     log("✓ Partition table refreshed")
 
-    setup_unencrypted_partition()
+    setup_unencrypted_partition(veracrypt_dir)
     setup_docs_partition()
 
 def fix_partition_table_tails():
@@ -504,7 +651,7 @@ def fix_partition_table_tails():
     time.sleep(5)
 
     setup_docs_partition()
-    setup_unencrypted_partition()
+    setup_unencrypted_partition(veracrypt_dir)
 
     log("Tails + encrypted documents partition setup complete!")
 
@@ -604,7 +751,7 @@ def fix_partition_table():
     setup_kali_partition()
     if CREATE_DOCS:
         setup_docs_partition()
-    setup_unencrypted_partition()
+    setup_unencrypted_partition(veracrypt_dir)
 
 def setup_kali_partition():
     """
@@ -702,22 +849,28 @@ def setup_docs_partition():
     log("ENCRYPTED VOLUME SETUP")
     log("="*70)
     log("\nYou will now create an encrypted volume for sensitive documents.")
-    log("\nWhat you'll be asked:")
-    log("  1. PASSWORD: Enter a strong passphrase (you'll type it twice)")
-    log("     - Use at least 20 characters")
-    log("     - Mix uppercase, lowercase, numbers, and symbols")
-    log("     - Avoid dictionary words or personal information")
-    log("  2. PIM (Personal Iterations Multiplier):")
+    log("")
+    log("SECURITY SETTINGS:")
+    log("  • Encryption: AES-Twofish-Serpent (triple cascade)")
+    log("  • Hash: SHA-512")
     if PARANOID_MODE:
-        log("     - PARANOID MODE: PIM set to 5000 (maximum security)")
-        log("     - Unlock time: ~5-7 seconds")
+        log("  • PIM: 5000 (PARANOID mode - maximum security)")
+        log("  • Unlock time: ~5-7 seconds")
     else:
-        log("     - STANDARD: PIM set to 2000 (high security)")
-        log("     - Unlock time: ~2-3 seconds")
-    log("  3. KEYFILES: Leave blank unless you know what you're doing")
-    log("\nIMPORTANT: Remember your password! There is NO password recovery!")
+        log("  • PIM: 2000 (standard high security)")
+        log("  • Unlock time: ~2-3 seconds")
+    log("")
+    log("PASSWORD REQUIREMENTS:")
+    log("  • Minimum 20 characters (longer is better)")
+    log("  • Mix uppercase, lowercase, numbers, and symbols")
+    log("  • Avoid dictionary words or personal information")
+    log("  • Example: My$ecur3Tr@v3lD0cs!2025#Paris")
+    log("")
+    log("⚠ CRITICAL: There is NO password recovery!")
+    log("  If you forget your password, your data is GONE FOREVER.")
+    log("")
     log("="*70)
-    input("\nPress ENTER to continue with encryption setup...")
+    input("Press ENTER when you're ready to create your password...")
 
     log("\nConfiguring VeraCrypt encryption for documents partition...")
 
@@ -734,11 +887,32 @@ def setup_docs_partition():
     )
 
     log("\nStarting VeraCrypt encryption (this may take a few minutes)...")
-    log("You will be prompted for:")
-    log("  1. Password (enter twice)")
-    log("  2. PIM (press Enter to use default)")
-    log("  3. Keyfiles (press Enter to skip)")
-    log("  4. Filesystem (will use ext4 automatically)")
+    log("="*70)
+    log("VERACRYPT WILL ASK YOU THESE QUESTIONS:")
+    log("="*70)
+    log("")
+    log("1. 'Enter password:' → Type your strong password (20+ characters)")
+    log("   Then press ENTER")
+    log("")
+    log("2. 'Re-enter password:' → Type the SAME password again")
+    log("   Then press ENTER")
+    log("")
+    log("3. 'Enter PIM:' → Just press ENTER")
+    log(f"   (We're using PIM {pim_value} automatically)")
+    log("")
+    log("4. 'Enter keyfile path [none]:' → Just press ENTER")
+    log("   (Keyfiles not needed for most users)")
+    log("")
+    log("5. 'Please type at least 320 randomly chosen characters'")
+    log("   → Smash random keys on your keyboard until it says 'Done'")
+    log("   This creates entropy for encryption")
+    log("")
+    log("6. 'Protect hidden volume (if any)? (y=Yes/n=No) [No]:' → Type: n")
+    log("   Then press ENTER (we're not using hidden volumes)")
+    log("")
+    log("="*70)
+    log("Creating volume now...")
+    log("="*70)
     log("")
     run_command(veracrypt_create_cmd, shell=True, interactive=True)
     log("\n✓ Documents partition encrypted successfully!")
@@ -747,9 +921,12 @@ def setup_docs_partition():
     log(f"  PIM: {pim_value}")
     log(f"  Filesystem: ext4")
 
-def setup_unencrypted_partition():
+def setup_unencrypted_partition(veracrypt_dir=None):
     """
     Sets up the unencrypted partition for scripts and instructions.
+
+    Args:
+        veracrypt_dir (str): Path to directory containing portable VeraCrypt files
     """
     global DRIVE
     UNENCRYPTED_PART = get_partition_name(DRIVE, get_last_partition_number())
@@ -772,127 +949,81 @@ def setup_unencrypted_partition():
     run_command(f"sudo mount {UNENCRYPTED_PART} /mnt/unencrypted", shell=True)
     log("✓ Tools partition mounted")
 
-    instructions = f"""
-INSTRUCTIONS FOR ACCESSING SECURE STORAGE
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    tools_dir = os.path.join(script_dir, "tools")
 
-To access your secure partition:
-  1. Run: sudo ./mount_storage.sh
-  2. Enter your password when prompted
-  3. Your files will be available at /mnt/secure_storage
+    log("\nCopying helper files from tools/ directory...")
 
-To safely lock your storage:
-  1. Close all files and applications using the storage
-  2. Run: sudo ./lock_storage.sh
-  3. Your data is now secured
+    # Copy README.txt
+    readme_path = os.path.join(tools_dir, "README.txt")
+    if os.path.exists(readme_path):
+        run_command(f"sudo cp '{readme_path}' /mnt/unencrypted/README.txt", shell=True)
+        log("  ✓ README.txt copied")
+    else:
+        log(f"  ⚠ Warning: {readme_path} not found, skipping README")
 
-IMPORTANT: Always lock your storage before removing the device.
-"""
+    # Copy WINDOWS_INSTRUCTIONS.txt
+    windows_inst_path = os.path.join(tools_dir, "WINDOWS_INSTRUCTIONS.txt")
+    if os.path.exists(windows_inst_path):
+        run_command(f"sudo cp '{windows_inst_path}' /mnt/unencrypted/WINDOWS_INSTRUCTIONS.txt", shell=True)
+        log("  ✓ WINDOWS_INSTRUCTIONS.txt copied")
+    else:
+        log(f"  ⚠ Warning: {windows_inst_path} not found")
 
-    log("\nCreating helper files...")
-    with open("/tmp/README.txt", "w") as readme_file:
-        readme_file.write(instructions)
-    run_command("sudo cp /tmp/README.txt /mnt/unencrypted/README.txt", shell=True)
-    run_command("sudo rm /tmp/README.txt", shell=True)
-    log("  ✓ README.txt created")
+    # Copy MOBILE_INSTRUCTIONS.txt
+    mobile_inst_path = os.path.join(tools_dir, "MOBILE_INSTRUCTIONS.txt")
+    if os.path.exists(mobile_inst_path):
+        run_command(f"sudo cp '{mobile_inst_path}' /mnt/unencrypted/MOBILE_INSTRUCTIONS.txt", shell=True)
+        log("  ✓ MOBILE_INSTRUCTIONS.txt copied")
+    else:
+        log(f"  ⚠ Warning: {mobile_inst_path} not found")
 
-    mount_script = """#!/bin/bash
-# Script to mount secure storage partition
+    # Copy mount_storage.sh
+    mount_script_path = os.path.join(tools_dir, "mount_storage.sh")
+    if os.path.exists(mount_script_path):
+        run_command(f"sudo cp '{mount_script_path}' /mnt/unencrypted/mount_storage.sh", shell=True)
+        run_command("sudo chmod +x /mnt/unencrypted/mount_storage.sh", shell=True)
+        log("  ✓ mount_storage.sh copied")
+    else:
+        log(f"  ⚠ Warning: {mount_script_path} not found, skipping mount script")
 
-echo "=== Secure Storage Mount ==="
-echo ""
-echo "Available storage devices:"
-lsblk -o NAME,SIZE,TYPE,LABEL | grep -E 'disk|part'
-echo ""
-read -p "Enter the partition path (e.g., /dev/sdb3): " DRIVE_PATH
+    # Copy lock_storage.sh
+    lock_script_path = os.path.join(tools_dir, "lock_storage.sh")
+    if os.path.exists(lock_script_path):
+        run_command(f"sudo cp '{lock_script_path}' /mnt/unencrypted/lock_storage.sh", shell=True)
+        run_command("sudo chmod +x /mnt/unencrypted/lock_storage.sh", shell=True)
+        log("  ✓ lock_storage.sh copied")
+    else:
+        log(f"  ⚠ Warning: {lock_script_path} not found, skipping lock script")
 
-if [ -z "$DRIVE_PATH" ]; then
-    echo "Error: No partition specified."
-    exit 1
-fi
+    # Copy portable VeraCrypt files
+    if veracrypt_dir and os.path.exists(veracrypt_dir):
+        log("\nCopying portable VeraCrypt binaries...")
+        run_command("sudo mkdir -p /mnt/unencrypted/VeraCrypt", shell=True)
 
-if [ ! -b "$DRIVE_PATH" ]; then
-    echo "Error: $DRIVE_PATH is not a valid block device."
-    exit 1
-fi
+        veracrypt_files = [
+            ("VeraCrypt-Portable-Windows.exe", "Windows portable"),
+            ("VeraCrypt-Portable-Linux.AppImage", "Linux portable AppImage"),
+            ("veracrypt-Ubuntu-22.04-amd64.deb", "Linux DEB installer"),
+            ("VeraCrypt-MacOS.dmg", "macOS installer")
+        ]
 
-echo ""
-echo "Mounting secure storage from $DRIVE_PATH..."
-sudo mkdir -p /mnt/secure_storage
+        for filename, description in veracrypt_files:
+            src = os.path.join(veracrypt_dir, filename)
+            if os.path.exists(src):
+                run_command(f"sudo cp '{src}' /mnt/unencrypted/VeraCrypt/{filename}", shell=True)
+                if "Linux" in filename:
+                    run_command(f"sudo chmod +x /mnt/unencrypted/VeraCrypt/{filename}", shell=True)
+                log(f"  ✓ {description} copied")
+            else:
+                log(f"  ⚠ {description} not found (optional)")
 
-# Mount the encrypted volume
-if sudo veracrypt --text --mount "$DRIVE_PATH" /mnt/secure_storage; then
-    echo ""
-    echo "SUCCESS: Secure storage is now accessible at /mnt/secure_storage"
-    echo ""
-    echo "Remember to run ./lock_storage.sh when finished!"
-else
-    echo ""
-    echo "ERROR: Failed to mount storage. Check your password and try again."
-    sudo rmdir /mnt/secure_storage 2>/dev/null
-    exit 1
-fi
-"""
-
-    with open("/tmp/mount_storage.sh", "w") as script_file:
-        script_file.write(mount_script)
-    run_command("sudo cp /tmp/mount_storage.sh /mnt/unencrypted/mount_storage.sh", shell=True)
-    run_command("sudo chmod +x /mnt/unencrypted/mount_storage.sh", shell=True)
-    run_command("sudo rm /tmp/mount_storage.sh", shell=True)
-    log("  ✓ mount_storage.sh created")
-
-    cleanup_script = """#!/bin/bash
-# Script to safely lock secure storage
-
-echo "=== Secure Storage Lock ==="
-echo ""
-
-# Check if storage is mounted
-if mountpoint -q /mnt/secure_storage; then
-    echo "Checking for open files..."
-
-    # Check if any processes are using the mount
-    if sudo lsof /mnt/secure_storage 2>/dev/null | grep -q /mnt/secure_storage; then
-        echo ""
-        echo "WARNING: Files are still open in the secure storage!"
-        echo "Open files/processes:"
-        sudo lsof /mnt/secure_storage 2>/dev/null
-        echo ""
-        read -p "Force close and lock anyway? (y/N): " FORCE
-        if [ "$FORCE" != "y" ] && [ "$FORCE" != "Y" ]; then
-            echo "Lock cancelled. Please close all files and try again."
-            exit 1
-        fi
-    fi
-
-    echo ""
-    echo "Locking secure storage..."
-
-    # Sync any pending writes
-    sync
-
-    # Dismount the encrypted volume
-    if sudo veracrypt --text --dismount /mnt/secure_storage; then
-        sudo rmdir /mnt/secure_storage 2>/dev/null
-        echo ""
-        echo "SUCCESS: Secure storage is now locked."
-        echo "Your data is safe."
-    else
-        echo ""
-        echo "ERROR: Failed to lock storage. Try closing all applications and run again."
-        exit 1
-    fi
-else
-    echo "Secure storage is not currently mounted."
-    echo "Nothing to lock."
-fi
-"""
-
-    with open("/tmp/lock_storage.sh", "w") as script_file:
-        script_file.write(cleanup_script)
-    run_command("sudo cp /tmp/lock_storage.sh /mnt/unencrypted/lock_storage.sh", shell=True)
-    run_command("sudo chmod +x /mnt/unencrypted/lock_storage.sh", shell=True)
-    run_command("sudo rm /tmp/lock_storage.sh", shell=True)
-    log("  ✓ lock_storage.sh created")
+        log("  ✓ Portable VeraCrypt binaries installed")
+        log("\n  📌 IMPORTANT: These binaries allow accessing encrypted files")
+        log("      on ANY Windows, Linux, or Mac computer WITHOUT installing software!")
+    else:
+        log("\n  ⚠ No portable VeraCrypt binaries provided - skipping")
 
     log("\nUnmounting tools partition...")
     run_command("sudo umount /mnt/unencrypted", shell=True)
