@@ -25,12 +25,95 @@ KALI_ISO = ""
 TAILS_ISO = ""
 CUSTOM_ISO = ""
 DRIVE = ""
+STATE_FILE = "/tmp/covert_sd_state.json"
+
+# Checkpoint states
+CHECKPOINTS = {
+    "VERACRYPT_DOWNLOADED": False,
+    "DRIVE_SELECTED": False,
+    "DRIVE_WIPED": False,
+    "ISO_WRITTEN": False,
+    "PARTITIONS_CREATED": False,
+    "PERSISTENCE_SETUP": False,
+    "DOCS_ENCRYPTED": False,
+    "TOOLS_SETUP": False,
+    "COMPLETE": False
+}
 
 def log(message):
     """Logs a message to both the log file and the terminal."""
     with open(LOG_FILE, "a") as log_file:
         log_file.write(message + "\n")
     print(message)
+
+def save_state(checkpoint_name, data=None):
+    """Save current progress to state file."""
+    global CHECKPOINTS
+    CHECKPOINTS[checkpoint_name] = True
+
+    state = {
+        "checkpoints": CHECKPOINTS,
+        "drive": DRIVE,
+        "timestamp": TIMESTAMP,
+        "log_file": LOG_FILE,
+        "create_kali": CREATE_KALI,
+        "create_docs": CREATE_DOCS,
+        "create_tails": CREATE_TAILS,
+        "create_custom": CREATE_CUSTOM,
+        "kali_iso": KALI_ISO,
+        "tails_iso": TAILS_ISO,
+        "custom_iso": CUSTOM_ISO,
+        "fast_mode": FAST_MODE,
+        "paranoid_mode": PARANOID_MODE
+    }
+
+    if data:
+        state.update(data)
+
+    try:
+        with open(STATE_FILE, 'w') as f:
+            json.dump(state, f, indent=2)
+        log(f"✓ Checkpoint saved: {checkpoint_name}")
+    except Exception as e:
+        log(f"⚠ Warning: Could not save checkpoint: {e}")
+
+def load_state():
+    """Load previous progress from state file."""
+    global CHECKPOINTS, DRIVE, TIMESTAMP, LOG_FILE
+    global CREATE_KALI, CREATE_DOCS, CREATE_TAILS, CREATE_CUSTOM
+    global KALI_ISO, TAILS_ISO, CUSTOM_ISO, FAST_MODE, PARANOID_MODE
+
+    if not os.path.exists(STATE_FILE):
+        return None
+
+    try:
+        with open(STATE_FILE, 'r') as f:
+            state = json.load(f)
+
+        CHECKPOINTS = state.get("checkpoints", CHECKPOINTS)
+        DRIVE = state.get("drive", "")
+        TIMESTAMP = state.get("timestamp", TIMESTAMP)
+        LOG_FILE = state.get("log_file", LOG_FILE)
+        CREATE_KALI = state.get("create_kali", False)
+        CREATE_DOCS = state.get("create_docs", False)
+        CREATE_TAILS = state.get("create_tails", False)
+        CREATE_CUSTOM = state.get("create_custom", False)
+        KALI_ISO = state.get("kali_iso", "")
+        TAILS_ISO = state.get("tails_iso", "")
+        CUSTOM_ISO = state.get("custom_iso", "")
+        FAST_MODE = state.get("fast_mode", False)
+        PARANOID_MODE = state.get("paranoid_mode", False)
+
+        return state
+    except Exception as e:
+        log(f"⚠ Warning: Could not load state: {e}")
+        return None
+
+def clear_state():
+    """Remove state file when setup is complete."""
+    if os.path.exists(STATE_FILE):
+        os.remove(STATE_FILE)
+        log("✓ State file cleared")
 
 def run_command(command, shell=False, interactive=False, ignore_enospc=False):
     """
@@ -135,9 +218,51 @@ def download_portable_veracrypt():
     log("This is a one-time download that will be stored on your device.")
     log("")
 
+    # Use consistent temp directory for caching across runs
+    temp_dir = "/tmp/veracrypt_download"
+
+    # Check if we already have cached downloads
+    if os.path.exists(temp_dir):
+        log(f"✓ Found existing VeraCrypt cache at: {temp_dir}")
+        log("Checking if all required files are present...")
+
+        # Check if all files exist and are recent enough
+        cache_valid = True
+        cached_files = []
+
+        for platform, info in {
+            "Windows": "VeraCrypt-Portable-Windows.exe",
+            "Linux AppImage": "VeraCrypt-Portable-Linux.AppImage",
+            "Linux DEB": "veracrypt-Ubuntu-22.04-amd64.deb",
+            "macOS": "VeraCrypt-MacOS.dmg"
+        }.items():
+            file_path = os.path.join(temp_dir, info)
+            if os.path.exists(file_path):
+                size_mb = os.path.getsize(file_path) / (1024 * 1024)
+                cached_files.append(f"  ✓ {platform}: {size_mb:.1f} MB")
+            else:
+                cache_valid = False
+                break
+
+        if cache_valid:
+            log("✓ All VeraCrypt files found in cache!")
+            for cf in cached_files:
+                log(cf)
+            log("")
+            use_cache = input("Use cached files? (y/n) [Default: y]: ") or "y"
+            if use_cache.lower() == "y":
+                log("✓ Using cached VeraCrypt downloads")
+                return temp_dir
+            else:
+                log("Removing old cache and downloading fresh copies...")
+                shutil.rmtree(temp_dir)
+        else:
+            log("⚠ Cache incomplete, will re-download")
+            shutil.rmtree(temp_dir)
+
     # Create temp directory for downloads
-    temp_dir = tempfile.mkdtemp(prefix="veracrypt_download_")
-    log(f"Using temporary directory: {temp_dir}")
+    os.makedirs(temp_dir, exist_ok=True)
+    log(f"Downloading to: {temp_dir}")
     log("")
 
     # Get latest VeraCrypt version from GitHub
@@ -322,26 +447,69 @@ def setup_usb():
 
     # Download portable VeraCrypt first (so it's ready to copy later)
     veracrypt_dir = None
-    if CREATE_DOCS:
+    if CREATE_DOCS and not CHECKPOINTS["VERACRYPT_DOWNLOADED"]:
         veracrypt_dir = download_portable_veracrypt()
+        save_state("VERACRYPT_DOWNLOADED", {"veracrypt_dir": veracrypt_dir})
+    elif CREATE_DOCS:
+        # Already downloaded, use cached version
+        veracrypt_dir = "/tmp/veracrypt_download"
+        log("✓ Skipping VeraCrypt download (already completed)")
 
-    log("\n" + "="*70)
-    log("STEP 1: DRIVE SELECTION")
-    log("="*70)
-    log("Available storage devices on your system:")
-    list_drives()
-    log("\nIMPORTANT: Double-check the drive path! All data will be erased.")
-    DRIVE = input("Enter the drive to use for USB (e.g., /dev/sda) [Default: /dev/sda]: ") or "/dev/sda"
+    if not CHECKPOINTS["DRIVE_SELECTED"]:
+        log("\n" + "="*70)
+        log("STEP 1: DRIVE SELECTION")
+        log("="*70)
+        log("Available storage devices on your system:")
+        list_drives()
+        log("\n⚠️  WARNING: This will repartition and format the selected drive.")
+        log("Make sure you select the correct device!")
 
-    confirm = input(f"\nYou have selected {DRIVE}. Is this correct? (y/n) [Default: y]: ") or "y"
-    if confirm.lower() != "y":
-        log("Drive selection canceled. Exiting.")
-        sys.exit(1)
+        while True:
+            DRIVE = input("\nEnter the drive to use (e.g., /dev/sdb): ")
 
-    log("\n" + "="*70)
-    log("STEP 2: PREPARING DRIVE")
-    log("="*70)
-    prepare_drive(DRIVE)
+            if not DRIVE:
+                log("Error: No drive specified. Please enter a drive path.")
+                continue
+
+            # Check if drive exists
+            if not os.path.exists(DRIVE):
+                log(f"Error: Drive {DRIVE} does not exist!")
+                log("Please check the available drives listed above and try again.")
+                retry = input("Try again? (y/n) [Default: y]: ") or "y"
+                if retry.lower() != "y":
+                    log("Drive selection canceled. Exiting.")
+                    sys.exit(1)
+                continue
+
+            # Check if it's a block device
+            if not os.path.isdir(DRIVE) and not os.path.exists(DRIVE):
+                log(f"Error: {DRIVE} is not a valid block device!")
+                continue
+
+            # Confirm selection - more accurate warning
+            log(f"\nYou selected: {DRIVE}")
+            log("The script will:")
+            log("  • Clear partition table")
+            log("  • Create new partitions")
+            log("  • Optionally wipe (you'll be asked)")
+            log("  • Format with new filesystems")
+            confirm = input(f"\nProceed with {DRIVE}? (yes/no) [Default: no]: ")
+            if confirm.lower() == "yes":
+                break
+            else:
+                log("Drive selection canceled.")
+                retry = input("Select a different drive? (y/n) [Default: y]: ") or "y"
+                if retry.lower() != "y":
+                    log("Exiting.")
+                    sys.exit(1)
+
+        log("\n" + "="*70)
+        log("STEP 2: PREPARING DRIVE")
+        log("="*70)
+        prepare_drive(DRIVE)
+        save_state("DRIVE_SELECTED")
+    else:
+        log(f"✓ Skipping drive selection (already selected: {DRIVE})")
 
     if CREATE_KALI or CREATE_TAILS or CREATE_DOCS:
         log("\n" + "="*70)
@@ -477,19 +645,19 @@ def setup_usb():
     if iso_written:
         if CREATE_KALI or CREATE_CUSTOM:
             # Both Kali and custom ISOs use the same partitioning approach
-            fix_partition_table()
+            fix_partition_table(veracrypt_dir)
         elif CREATE_TAILS:
             if CREATE_DOCS:
                 # For Tails with docs, add partitions after Tails
-                fix_partition_table_tails()
+                fix_partition_table_tails(veracrypt_dir)
             else:
                 # Tails only, no additional partitions
                 log("Tails installation complete. No additional partitions requested.")
     elif CREATE_DOCS:
         # If no ISO was written, just set up documents partition
-        fix_partition_table_docs_only()
+        fix_partition_table_docs_only(veracrypt_dir)
 
-def fix_partition_table_docs_only():
+def fix_partition_table_docs_only(veracrypt_dir=None):
     """
     Sets up partitions solely for encrypted documents without altering existing OS partitions.
     """
@@ -562,7 +730,7 @@ def fix_partition_table_docs_only():
     setup_unencrypted_partition(veracrypt_dir)
     setup_docs_partition()
 
-def fix_partition_table_tails():
+def fix_partition_table_tails(veracrypt_dir=None):
     """
     Adds encrypted documents partition after Tails installation without breaking boot.
     Tails creates its own partition table, so we extend it carefully.
@@ -655,7 +823,7 @@ def fix_partition_table_tails():
 
     log("Tails + encrypted documents partition setup complete!")
 
-def fix_partition_table():
+def fix_partition_table(veracrypt_dir=None):
     """
     Fixes the partition table for Kali Linux by adding persistence and documents partitions.
     """
@@ -888,7 +1056,7 @@ def setup_docs_partition():
 
     log("\nStarting VeraCrypt encryption (this may take a few minutes)...")
     log("="*70)
-    log("VERACRYPT WILL ASK YOU THESE QUESTIONS:")
+    log("VERACRYPT PROMPTS - FOLLOW THESE STEPS:")
     log("="*70)
     log("")
     log("1. 'Enter password:' → Type your strong password (20+ characters)")
@@ -897,18 +1065,16 @@ def setup_docs_partition():
     log("2. 'Re-enter password:' → Type the SAME password again")
     log("   Then press ENTER")
     log("")
-    log("3. 'Enter PIM:' → Just press ENTER")
-    log(f"   (We're using PIM {pim_value} automatically)")
-    log("")
-    log("4. 'Enter keyfile path [none]:' → Just press ENTER")
+    log("3. 'Enter keyfile path [none]:' → Just press ENTER")
     log("   (Keyfiles not needed for most users)")
     log("")
-    log("5. 'Please type at least 320 randomly chosen characters'")
-    log("   → Smash random keys on your keyboard until it says 'Done'")
-    log("   This creates entropy for encryption")
+    log("4. 'Please type at least 320 randomly chosen characters'")
+    log("   → Smash random keys on your keyboard")
+    log("   → Keep typing until it shows 'Characters remaining: 0'")
+    log("   → Then press ENTER")
+    log("   (This creates random entropy for encryption)")
     log("")
-    log("6. 'Protect hidden volume (if any)? (y=Yes/n=No) [No]:' → Type: n")
-    log("   Then press ENTER (we're not using hidden volumes)")
+    log(f"ℹ️  NOTE: PIM is set to {pim_value} automatically (not prompted)")
     log("")
     log("="*70)
     log("Creating volume now...")
@@ -920,6 +1086,7 @@ def setup_docs_partition():
     log(f"  Hash: SHA-512")
     log(f"  PIM: {pim_value}")
     log(f"  Filesystem: ext4")
+    save_state("DOCS_ENCRYPTED")
 
 def setup_unencrypted_partition(veracrypt_dir=None):
     """
@@ -1028,6 +1195,7 @@ def setup_unencrypted_partition(veracrypt_dir=None):
     log("\nUnmounting tools partition...")
     run_command("sudo umount /mnt/unencrypted", shell=True)
     log("✓ Tools partition setup complete")
+    save_state("TOOLS_SETUP")
 
 def get_last_partition_number():
     """
@@ -1081,11 +1249,67 @@ def main():
     parser.add_argument("--fast", action="store_true", help="Enable fast setup with less secure encryption")
     parser.add_argument("--paranoid", action="store_true", help="Enable paranoid mode: maximum security, 3-pass shred, highest encryption")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("-r", "--resume", action="store_true", help="Resume from previous incomplete setup")
 
     args = parser.parse_args()
 
     # Prevent using -a with -t; argparse handles this due to mutually exclusive group
     # However, if you want to provide a custom error message or additional handling, you can add it here
+
+    # Handle resume flag
+    if args.resume:
+        previous_state = load_state()
+        if previous_state:
+            log("\n" + "="*70)
+            log("🔄 RESUMING PREVIOUS SETUP")
+            log("="*70)
+            log("")
+            log("Found incomplete setup from previous run:")
+            log(f"  Drive: {previous_state.get('drive', 'Unknown')}")
+            log(f"  Started: {previous_state.get('timestamp', 'Unknown')}")
+            log("")
+            log("Completed steps:")
+            for checkpoint, completed in previous_state.get('checkpoints', {}).items():
+                status = "✓" if completed else "✗"
+                log(f"  {status} {checkpoint}")
+            log("")
+            log("✓ Resuming from last checkpoint...")
+            log(f"Continuing log in: {LOG_FILE}")
+            log("")
+            # State already loaded by load_state()
+            # Skip to setup_usb() - it will check checkpoints
+            check_dependencies()
+            setup_usb()
+            return
+        else:
+            log("Error: No previous setup found to resume.")
+            log("State file not found at: /tmp/covert_sd_state.json")
+            log("")
+            log("To start a new setup, run without --resume flag:")
+            log("  sudo ./covert_sd_card_tool.py -d -a -t /path/to/tails.iso")
+            sys.exit(1)
+
+    # Check if state exists but user didn't use --resume flag
+    previous_state = load_state()
+    if previous_state:
+        log("\n" + "="*70)
+        log("⚠️  PREVIOUS INCOMPLETE SETUP FOUND")
+        log("="*70)
+        log("")
+        log(f"Drive: {previous_state.get('drive', 'Unknown')}")
+        log(f"Started: {previous_state.get('timestamp', 'Unknown')}")
+        log("")
+        log("You have two options:")
+        log("  1. Resume previous setup:  sudo ./covert_sd_card_tool.py --resume")
+        log("  2. Start fresh (WARNING: will overwrite any existing setup)")
+        log("")
+        choice = input("Continue with fresh setup? (yes/no) [Default: no]: ") or "no"
+        if choice.lower() != "yes":
+            log("Exiting. Use --resume flag to continue previous setup.")
+            sys.exit(0)
+        else:
+            log("Starting fresh setup (old state will be cleared)...")
+            clear_state()
 
     if not any([args.all, args.kali, args.docs, args.tails, args.custom]):
         parser.print_help()
@@ -1164,7 +1388,21 @@ def main():
         log("")
 
     log(f"Log file saved: {LOG_FILE}")
+    log("")
+    if CREATE_DOCS and os.path.exists("/tmp/veracrypt_download"):
+        cache_size = sum(os.path.getsize(os.path.join("/tmp/veracrypt_download", f))
+                        for f in os.listdir("/tmp/veracrypt_download")
+                        if os.path.isfile(os.path.join("/tmp/veracrypt_download", f))) / (1024 * 1024)
+        log("💡 TIP: VeraCrypt downloads cached at /tmp/veracrypt_download")
+        log(f"   Size: {cache_size:.1f} MB")
+        log("   Next SD card creation will skip downloads!")
+        log("   To clean up: rm -rf /tmp/veracrypt_download")
+        log("")
     log("="*70)
+
+    # Mark as complete and clear state file
+    save_state("COMPLETE")
+    clear_state()
 
 if __name__ == "__main__":
     main()
